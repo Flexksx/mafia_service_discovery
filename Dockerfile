@@ -8,7 +8,7 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy poetry files
-COPY pyproject.toml README.md ./
+COPY pyproject.toml ./
 
 # Install poetry and dependencies
 RUN pip install poetry && \
