@@ -1,7 +1,10 @@
 from fastapi import APIRouter, HTTPException, Depends, Header
-import logging
+from typing import Dict, Any
+from datetime import datetime
 
 from service_discovery.service_registration.registry import service_registry
+from service_discovery.service_registration.health_monitor import health_monitor
+from service_discovery.logger_config import ServiceDiscoveryLogger
 from service_discovery.types import (
     ServiceRegistrationRequest,
     ServiceRegistrationResponse,
@@ -27,7 +30,7 @@ from service_discovery.constants import (
 )
 from service_discovery.config import SERVICE_DISCOVERY_SECRET
 
-logger = logging.getLogger(__name__)
+logger = ServiceDiscoveryLogger.get_logger(__name__)
 
 router = APIRouter()
 
@@ -241,4 +244,102 @@ async def get_service_instances_for_prometheus(service_name: str):
         raise HTTPException(
             status_code=HTTP_INTERNAL_SERVER_ERROR,
             detail=f"Failed to get service instances: {str(e)}",
+        )
+
+
+@router.get("/monitoring/stats")
+async def get_monitoring_stats():
+    """Get health monitoring statistics"""
+    try:
+        stats = health_monitor.get_monitoring_stats()
+        alert_states = health_monitor.get_alert_states()
+
+        # Calculate additional metrics
+        total_checks = stats["total_checks"]
+        success_rate = (
+            (stats["successful_checks"] / total_checks * 100) if total_checks > 0 else 0
+        )
+
+        return {
+            "monitoring_enabled": health_monitor.is_monitoring_enabled(),
+            "statistics": {
+                **stats,
+                "success_rate_percent": round(success_rate, 2),
+            },
+            "alert_states": {
+                service_key: {
+                    "service_name": alert_state.service_name,
+                    "instance_id": alert_state.instance_id,
+                    "last_alert_time": (
+                        alert_state.last_alert_time.isoformat()
+                        if alert_state.last_alert_time
+                        else None
+                    ),
+                    "alert_count": alert_state.alert_count,
+                }
+                for service_key, alert_state in alert_states.items()
+            },
+            "timestamp": datetime.now().isoformat(),
+        }
+
+    except Exception as e:
+        logger.error(f"Error getting monitoring stats: {e}")
+        raise HTTPException(
+            status_code=HTTP_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to get monitoring stats: {str(e)}",
+        )
+
+
+@router.post("/monitoring/reset-stats")
+async def reset_monitoring_stats(secret: str = Depends(verify_service_secret)):
+    """Reset monitoring statistics (requires authentication)"""
+    try:
+        health_monitor.reset_stats()
+        return {"success": True, "message": "Monitoring statistics reset successfully"}
+
+    except Exception as e:
+        logger.error(f"Error resetting monitoring stats: {e}")
+        raise HTTPException(
+            status_code=HTTP_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to reset monitoring stats: {str(e)}",
+        )
+
+
+@router.get("/monitoring/health")
+async def get_monitoring_health():
+    """Get monitoring system health status"""
+    try:
+        stats = health_monitor.get_monitoring_stats()
+        total_checks = stats["total_checks"]
+
+        # Determine health status based on success rate
+        if total_checks == 0:
+            status = "unknown"
+            message = "No health checks performed yet"
+        else:
+            success_rate = stats["successful_checks"] / total_checks
+            if success_rate >= 0.95:
+                status = "healthy"
+                message = "Monitoring system is healthy"
+            elif success_rate >= 0.8:
+                status = "degraded"
+                message = "Monitoring system is degraded"
+            else:
+                status = "unhealthy"
+                message = "Monitoring system is unhealthy"
+
+        return {
+            "status": status,
+            "message": message,
+            "monitoring_enabled": health_monitor.is_monitoring_enabled(),
+            "success_rate": round(success_rate * 100, 2) if total_checks > 0 else 0,
+            "total_checks": total_checks,
+            "timestamp": datetime.now().isoformat(),
+        }
+
+    except Exception as e:
+        logger.error(f"Error getting monitoring health: {e}")
+        raise HTTPException(
+            status_code=HTTP_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to get monitoring health: {str(e)}",
         )

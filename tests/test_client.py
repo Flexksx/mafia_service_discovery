@@ -252,17 +252,90 @@ class ServiceDiscoveryTestClient:
             logger.error(f"Error getting Prometheus targets: {e}")
             return []
 
+    async def get_monitoring_stats(self) -> Dict:
+        """Get health monitoring statistics"""
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.get(
+                    f"{self.base_url}/v1/discovery/monitoring/stats"
+                )
+
+                if response.status_code == 200:
+                    return response.json()
+                else:
+                    logger.error(
+                        f"Failed to get monitoring stats: {response.status_code}"
+                    )
+                    return {}
+
+        except Exception as e:
+            logger.error(f"Error getting monitoring stats: {e}")
+            return {}
+
+    async def get_monitoring_health(self) -> Dict:
+        """Get monitoring system health status"""
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.get(
+                    f"{self.base_url}/v1/discovery/monitoring/health"
+                )
+
+                if response.status_code == 200:
+                    return response.json()
+                else:
+                    logger.error(
+                        f"Failed to get monitoring health: {response.status_code}"
+                    )
+                    return {}
+
+        except Exception as e:
+            logger.error(f"Error getting monitoring health: {e}")
+            return {}
+
+    async def reset_monitoring_stats(self) -> bool:
+        """Reset monitoring statistics (requires authentication)"""
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.post(
+                    f"{self.base_url}/v1/discovery/monitoring/reset-stats",
+                    headers=self.headers,
+                )
+
+                if response.status_code == 200:
+                    result = response.json()
+                    success = result.get("success", False)
+                    logger.info(
+                        f"Monitoring stats reset {'succeeded' if success else 'failed'}: {result.get('message', '')}"
+                    )
+                    return success
+                else:
+                    logger.error(
+                        f"Reset monitoring stats failed with status {response.status_code}: {response.text}"
+                    )
+                    return False
+
+        except Exception as e:
+            logger.error(f"Error resetting monitoring stats: {e}")
+            return False
+
 
 class MockService:
     """Mock service that simulates a real service for testing"""
 
-    def __init__(self, service_name: str, instance_id: str, port: int = None):
+    def __init__(
+        self,
+        service_name: str,
+        instance_id: str,
+        port: int = None,
+        load_percentage: float = 0.1,
+    ):
         self.service_name = service_name
         self.instance_id = instance_id
         self.port = port
         self.host = "localhost"
         self.health_endpoint = "/health"
         self.metadata = {"environment": "test", "version": "1.0.0"}
+        self.load_percentage = load_percentage  # Simulated load percentage
         self._running = False
         self._server = None
 
@@ -287,7 +360,7 @@ class MockService:
                 "service": self.service_name,
                 "instance": self.instance_id,
                 "timestamp": datetime.now().isoformat(),
-                "load_percentage": 0.1,  # Low load for testing
+                "load_percentage": self.load_percentage,
             }
 
         @app.get("/")
@@ -307,6 +380,12 @@ class MockService:
         if self._server and self._running:
             self._server.should_exit = True
             self._running = False
+
+    def set_load_percentage(self, load_percentage: float):
+        """Set the simulated load percentage for this service"""
+        self.load_percentage = max(
+            0.0, min(1.0, load_percentage)
+        )  # Clamp between 0 and 1
 
     def get_test_instance(self) -> ServiceInstanceData:
         """Get ServiceInstanceData for this mock service"""
