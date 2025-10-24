@@ -1,7 +1,6 @@
 from datetime import datetime
 from typing import Dict, List, Optional
 import asyncio
-import logging
 
 from service_discovery.types import ServiceInstance, ServiceStatus
 from service_discovery.constants import (
@@ -9,8 +8,13 @@ from service_discovery.constants import (
     LOG_SERVICE_UNREGISTERED,
     LOG_EXPIRED_SERVICE_REMOVED,
 )
+from service_discovery.logger_config import (
+    ServiceDiscoveryLogger,
+    log_service_registration,
+    log_service_unregistration,
+)
 
-logger = logging.getLogger(__name__)
+logger = ServiceDiscoveryLogger.get_logger(__name__)
 
 
 class ServiceRegistry:
@@ -30,13 +34,12 @@ class ServiceRegistry:
                 self._services[service_name] = {}
 
             self._services[service_name][instance_id] = service_instance
-            logger.info(
-                LOG_SERVICE_REGISTERED.format(
-                    service_name,
-                    instance_id,
-                    service_instance.host,
-                    service_instance.port,
-                )
+            log_service_registration(
+                logger,
+                service_name,
+                instance_id,
+                service_instance.host,
+                service_instance.port,
             )
             return True
 
@@ -46,7 +49,7 @@ class ServiceRegistry:
             if self._service_exists(service_name, instance_id):
                 del self._services[service_name][instance_id]
                 self._cleanup_empty_service(service_name)
-                logger.info(LOG_SERVICE_UNREGISTERED.format(service_name, instance_id))
+                log_service_unregistration(logger, service_name, instance_id)
                 return True
             return False
 

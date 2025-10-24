@@ -1,14 +1,27 @@
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
-import logging
 
 from service_discovery.api import api_router
 from service_discovery.service_registration.health_monitor import health_monitor
-from service_discovery.config import LOG_LEVEL, LOG_FORMAT
+from service_discovery.config import (
+    LOG_LEVEL,
+    LOG_FORMAT_TYPE,
+    LOG_ENABLE_CONSOLE,
+    LOG_ENABLE_FILE,
+    LOG_FILE_PATH,
+)
+from service_discovery.logger_config import ServiceDiscoveryLogger
 
 # Configure logging
-logging.basicConfig(level=getattr(logging, LOG_LEVEL), format=LOG_FORMAT)
-logger = logging.getLogger(__name__)
+ServiceDiscoveryLogger.setup_logging(
+    level=LOG_LEVEL,
+    format_type=LOG_FORMAT_TYPE,
+    enable_console=LOG_ENABLE_CONSOLE,
+    enable_file=LOG_ENABLE_FILE,
+    log_file_path=LOG_FILE_PATH,
+)
+
+logger = ServiceDiscoveryLogger.get_logger(__name__)
 
 
 @asynccontextmanager
