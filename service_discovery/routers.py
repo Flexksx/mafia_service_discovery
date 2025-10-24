@@ -253,3 +253,34 @@ async def get_healthy_service_instances(service_name: str):
         raise HTTPException(
             status_code=500, detail=f"Failed to get healthy service instances: {str(e)}"
         )
+
+
+@router.get("/services/{service_name}/instances")
+async def get_service_instances_for_prometheus(service_name: str):
+    """Get service instances in Prometheus HTTP service discovery format"""
+    try:
+        instances = await service_registry.get_healthy_service_instances(service_name)
+
+        # Return in Prometheus HTTP service discovery format
+        prometheus_instances = []
+        for instance in instances:
+            prometheus_instances.append(
+                {
+                    "targets": [f"{instance.host}:{instance.port}"],
+                    "labels": {
+                        "instance": instance.instance_id,
+                        "service_name": instance.service_name,
+                        "status": instance.status.value,
+                        "load_percentage": str(instance.load_percentage),
+                        **instance.metadata,
+                    },
+                }
+            )
+
+        return prometheus_instances
+
+    except Exception as e:
+        logger.error(f"Error getting service instances for Prometheus: {e}")
+        raise HTTPException(
+            status_code=500, detail=f"Failed to get service instances: {str(e)}"
+        )
