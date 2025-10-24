@@ -2,8 +2,16 @@ import asyncio
 import httpx
 import logging
 from datetime import datetime
-from typing import Dict, List
-from service_discovery.registry import service_registry, ServiceStatus, ServiceInstance
+from typing import Dict, List, Optional
+
+from service_discovery.service_registration.registry import service_registry
+from service_discovery.types import ServiceInstance, ServiceStatus
+from service_discovery.constants import (
+    LOG_HEALTH_MONITORING_STARTED,
+    LOG_HEALTH_MONITORING_STOPPED,
+    LOG_CRITICAL_LOAD_ALERT,
+    RETRY_DELAY_SECONDS,
+)
 from service_discovery.config import (
     HEALTH_CHECK_INTERVAL_SECONDS,
     HEALTH_CHECK_TIMEOUT_SECONDS,
@@ -19,7 +27,7 @@ class HealthMonitor:
 
     def __init__(self):
         self._running = False
-        self._monitoring_task: asyncio.Task = None
+        self._monitoring_task: Optional[asyncio.Task] = None
 
     async def start_monitoring(self):
         """Start the health monitoring loop"""
@@ -28,7 +36,7 @@ class HealthMonitor:
 
         self._running = True
         self._monitoring_task = asyncio.create_task(self._monitoring_loop())
-        logger.info("Health monitoring started")
+        logger.info(LOG_HEALTH_MONITORING_STARTED)
 
     async def stop_monitoring(self):
         """Stop the health monitoring loop"""
@@ -42,7 +50,7 @@ class HealthMonitor:
                 await self._monitoring_task
             except asyncio.CancelledError:
                 pass
-        logger.info("Health monitoring stopped")
+        logger.info(LOG_HEALTH_MONITORING_STOPPED)
 
     async def _monitoring_loop(self):
         """Main monitoring loop"""
@@ -55,12 +63,11 @@ class HealthMonitor:
                 break
             except Exception as e:
                 logger.error(f"Error in monitoring loop: {e}")
-                await asyncio.sleep(5)  # Short delay before retrying
+                await asyncio.sleep(RETRY_DELAY_SECONDS)
 
     async def _check_all_services(self):
         """Check health of all registered services"""
         all_services = await service_registry.get_all_services()
-
         for service_name, instances in all_services.items():
             for instance in instances:
                 await self._check_service_health(instance)
@@ -71,59 +78,67 @@ class HealthMonitor:
             health_url = (
                 f"http://{instance.host}:{instance.port}{instance.health_endpoint}"
             )
-
             async with httpx.AsyncClient(
                 timeout=HEALTH_CHECK_TIMEOUT_SECONDS
             ) as client:
                 response = await client.get(health_url)
-
-                if response.status_code == 200:
-                    health_data = response.json()
-                    load_percentage = health_data.get("load_percentage", 0.0)
-
-                    # Update service status
-                    await service_registry.update_service_health(
-                        instance.service_name,
-                        instance.instance_id,
-                        ServiceStatus.HEALTHY,
-                        load_percentage,
-                    )
-
-                    # Check for critical load
-                    if load_percentage >= CRITICAL_LOAD_THRESHOLD:
-                        logger.warning(
-                            f"CRITICAL LOAD ALERT: Service {instance.service_name}:{instance.instance_id} "
-                            f"is at {load_percentage:.1%} load (threshold: {CRITICAL_LOAD_THRESHOLD:.1%})"
-                        )
-
-                    logger.debug(
-                        f"Health check passed for {instance.service_name}:{instance.instance_id}"
-                    )
-                else:
-                    await service_registry.update_service_health(
-                        instance.service_name,
-                        instance.instance_id,
-                        ServiceStatus.UNHEALTHY,
-                    )
-                    logger.warning(
-                        f"Health check failed for {instance.service_name}:{instance.instance_id} - Status: {response.status_code}"
-                    )
-
+                await self._process_health_response(instance, response)
         except httpx.TimeoutException:
+            await self._handle_health_check_timeout(instance)
+        except Exception as e:
+            await self._handle_health_check_error(instance, e)
+
+    async def _process_health_response(
+        self, instance: ServiceInstance, response: httpx.Response
+    ):
+        """Process successful health check response"""
+        if response.status_code == 200:
+            health_data = response.json()
+            load_percentage = health_data.get("load_percentage", 0.0)
+
+            await service_registry.update_service_health(
+                instance.service_name,
+                instance.instance_id,
+                ServiceStatus.HEALTHY,
+                load_percentage,
+            )
+
+            if load_percentage >= CRITICAL_LOAD_THRESHOLD:
+                logger.warning(
+                    LOG_CRITICAL_LOAD_ALERT.format(
+                        instance.service_name,
+                        instance.instance_id,
+                        load_percentage,
+                        CRITICAL_LOAD_THRESHOLD,
+                    )
+                )
+        else:
             await service_registry.update_service_health(
                 instance.service_name, instance.instance_id, ServiceStatus.UNHEALTHY
             )
             logger.warning(
-                f"Health check timeout for {instance.service_name}:{instance.instance_id}"
+                f"Health check failed for {instance.service_name}:{instance.instance_id} - Status: {response.status_code}"
             )
 
-        except Exception as e:
-            await service_registry.update_service_health(
-                instance.service_name, instance.instance_id, ServiceStatus.UNHEALTHY
-            )
-            logger.error(
-                f"Health check error for {instance.service_name}:{instance.instance_id}: {e}"
-            )
+    async def _handle_health_check_timeout(self, instance: ServiceInstance):
+        """Handle health check timeout"""
+        await service_registry.update_service_health(
+            instance.service_name, instance.instance_id, ServiceStatus.UNHEALTHY
+        )
+        logger.warning(
+            f"Health check timeout for {instance.service_name}:{instance.instance_id}"
+        )
+
+    async def _handle_health_check_error(
+        self, instance: ServiceInstance, error: Exception
+    ):
+        """Handle health check error"""
+        await service_registry.update_service_health(
+            instance.service_name, instance.instance_id, ServiceStatus.UNHEALTHY
+        )
+        logger.error(
+            f"Health check error for {instance.service_name}:{instance.instance_id}: {error}"
+        )
 
     async def _cleanup_expired_services(self):
         """Remove services that haven't sent heartbeat within TTL"""

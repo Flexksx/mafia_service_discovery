@@ -1,10 +1,30 @@
 from fastapi import APIRouter, HTTPException, Depends, Header
-from pydantic import BaseModel
-from typing import Dict, List, Optional
-from datetime import datetime
 import logging
 
-from service_discovery.registry import service_registry, ServiceInstance, ServiceStatus
+from service_discovery.service_registration.registry import service_registry
+from service_discovery.types import (
+    ServiceRegistrationRequest,
+    ServiceRegistrationResponse,
+    ServiceHeartbeatRequest,
+    ServiceHeartbeatResponse,
+    ServiceInstanceResponse,
+    ServiceListResponse,
+)
+from service_discovery.constants import (
+    ERROR_MISSING_AUTH_HEADER,
+    ERROR_INVALID_AUTH_FORMAT,
+    ERROR_INVALID_SECRET,
+    ERROR_SERVICE_NOT_FOUND,
+    ERROR_REGISTRATION_FAILED,
+    ERROR_HEARTBEAT_FAILED,
+    SUCCESS_REGISTERED,
+    SUCCESS_HEARTBEAT_UPDATED,
+    SUCCESS_UNREGISTERED,
+    BEARER_PREFIX,
+    HTTP_UNAUTHORIZED,
+    HTTP_NOT_FOUND,
+    HTTP_INTERNAL_SERVER_ERROR,
+)
 from service_discovery.config import SERVICE_DISCOVERY_SECRET
 
 logger = logging.getLogger(__name__)
@@ -12,62 +32,21 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-class ServiceRegistrationRequest(BaseModel):
-    service_name: str
-    instance_id: str
-    host: str
-    port: int
-    health_endpoint: str = "/health"
-    metadata: Dict[str, str] = {}
-
-
-class ServiceRegistrationResponse(BaseModel):
-    success: bool
-    message: str
-
-
-class ServiceHeartbeatRequest(BaseModel):
-    service_name: str
-    instance_id: str
-
-
-class ServiceHeartbeatResponse(BaseModel):
-    success: bool
-    message: str
-
-
-class ServiceInstanceResponse(BaseModel):
-    service_name: str
-    instance_id: str
-    host: str
-    port: int
-    health_endpoint: str
-    status: str
-    last_health_check: Optional[datetime]
-    last_heartbeat: Optional[datetime]
-    load_percentage: float
-    metadata: Dict[str, str]
-    registered_at: datetime
-
-
-class ServiceListResponse(BaseModel):
-    services: Dict[str, List[ServiceInstanceResponse]]
-
-
 def verify_service_secret(authorization: str = Header(None)) -> bool:
     """Verify service discovery secret for internal communication"""
     if not authorization:
-        raise HTTPException(status_code=401, detail="Missing Authorization header")
-
-    if not authorization.startswith("Bearer "):
         raise HTTPException(
-            status_code=401, detail="Invalid Authorization header format"
+            status_code=HTTP_UNAUTHORIZED, detail=ERROR_MISSING_AUTH_HEADER
         )
 
-    secret = authorization[7:]  # Remove "Bearer " prefix
+    if not authorization.startswith(BEARER_PREFIX):
+        raise HTTPException(
+            status_code=HTTP_UNAUTHORIZED, detail=ERROR_INVALID_AUTH_FORMAT
+        )
 
+    secret = authorization[len(BEARER_PREFIX) :]
     if secret != SERVICE_DISCOVERY_SECRET:
-        raise HTTPException(status_code=401, detail="Invalid service discovery secret")
+        raise HTTPException(status_code=HTTP_UNAUTHORIZED, detail=ERROR_INVALID_SECRET)
     return True
 
 
@@ -77,6 +56,8 @@ async def register_service(
 ):
     """Register a new service instance"""
     try:
+        from service_discovery.types import ServiceInstance
+
         service_instance = ServiceInstance(
             service_name=request.service_name,
             instance_id=request.instance_id,
@@ -89,21 +70,19 @@ async def register_service(
         success = await service_registry.register_service(service_instance)
 
         if success:
-            logger.info(
-                f"Service registered: {request.service_name}:{request.instance_id}"
-            )
-            return ServiceRegistrationResponse(
-                success=True,
-                message=f"Service {request.service_name}:{request.instance_id} registered successfully",
-            )
+            message = f"Service {request.service_name}:{request.instance_id} {SUCCESS_REGISTERED}"
+            return ServiceRegistrationResponse(success=True, message=message)
         else:
             return ServiceRegistrationResponse(
-                success=False, message="Failed to register service"
+                success=False, message=ERROR_REGISTRATION_FAILED
             )
 
     except Exception as e:
         logger.error(f"Error registering service: {e}")
-        raise HTTPException(status_code=500, detail=f"Registration failed: {str(e)}")
+        raise HTTPException(
+            status_code=HTTP_INTERNAL_SERVER_ERROR,
+            detail=f"{ERROR_REGISTRATION_FAILED}: {str(e)}",
+        )
 
 
 @router.post("/heartbeat", response_model=ServiceHeartbeatResponse)
@@ -118,15 +97,18 @@ async def service_heartbeat(
 
         if success:
             return ServiceHeartbeatResponse(
-                success=True, message="Heartbeat updated successfully"
+                success=True, message=SUCCESS_HEARTBEAT_UPDATED
             )
         else:
-            return ServiceHeartbeatResponse(success=False, message="Service not found")
+            return ServiceHeartbeatResponse(
+                success=False, message=ERROR_SERVICE_NOT_FOUND
+            )
 
     except Exception as e:
         logger.error(f"Error updating heartbeat: {e}")
         raise HTTPException(
-            status_code=500, detail=f"Heartbeat update failed: {str(e)}"
+            status_code=HTTP_INTERNAL_SERVER_ERROR,
+            detail=f"{ERROR_HEARTBEAT_FAILED}: {str(e)}",
         )
 
 
@@ -139,13 +121,20 @@ async def unregister_service(
         success = await service_registry.unregister_service(service_name, instance_id)
 
         if success:
-            return {"success": True, "message": "Service unregistered successfully"}
+            return {"success": True, "message": SUCCESS_UNREGISTERED}
         else:
-            raise HTTPException(status_code=404, detail="Service not found")
+            raise HTTPException(
+                status_code=HTTP_NOT_FOUND, detail=ERROR_SERVICE_NOT_FOUND
+            )
 
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error unregistering service: {e}")
-        raise HTTPException(status_code=500, detail=f"Unregistration failed: {str(e)}")
+        raise HTTPException(
+            status_code=HTTP_INTERNAL_SERVER_ERROR,
+            detail=f"Unregistration failed: {str(e)}",
+        )
 
 
 @router.get("/services", response_model=ServiceListResponse)
@@ -153,23 +142,11 @@ async def list_all_services():
     """List all registered services"""
     try:
         all_services = await service_registry.get_all_services()
-
         response_data = {}
+
         for service_name, instances in all_services.items():
             response_data[service_name] = [
-                ServiceInstanceResponse(
-                    service_name=instance.service_name,
-                    instance_id=instance.instance_id,
-                    host=instance.host,
-                    port=instance.port,
-                    health_endpoint=instance.health_endpoint,
-                    status=instance.status.value,
-                    last_health_check=instance.last_health_check,
-                    last_heartbeat=instance.last_heartbeat,
-                    load_percentage=instance.load_percentage,
-                    metadata=instance.metadata,
-                    registered_at=instance.registered_at,
-                )
+                ServiceInstanceResponse.from_service_instance(instance)
                 for instance in instances
             ]
 
@@ -178,7 +155,8 @@ async def list_all_services():
     except Exception as e:
         logger.error(f"Error listing services: {e}")
         raise HTTPException(
-            status_code=500, detail=f"Failed to list services: {str(e)}"
+            status_code=HTTP_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to list services: {str(e)}",
         )
 
 
@@ -190,25 +168,13 @@ async def get_service_instances(service_name: str):
 
         if not instances:
             raise HTTPException(
-                status_code=404, detail=f"Service '{service_name}' not found"
+                status_code=HTTP_NOT_FOUND, detail=f"Service '{service_name}' not found"
             )
 
         return {
             "service_name": service_name,
             "instances": [
-                ServiceInstanceResponse(
-                    service_name=instance.service_name,
-                    instance_id=instance.instance_id,
-                    host=instance.host,
-                    port=instance.port,
-                    health_endpoint=instance.health_endpoint,
-                    status=instance.status.value,
-                    last_health_check=instance.last_health_check,
-                    last_heartbeat=instance.last_heartbeat,
-                    load_percentage=instance.load_percentage,
-                    metadata=instance.metadata,
-                    registered_at=instance.registered_at,
-                )
+                ServiceInstanceResponse.from_service_instance(instance)
                 for instance in instances
             ],
         }
@@ -218,7 +184,8 @@ async def get_service_instances(service_name: str):
     except Exception as e:
         logger.error(f"Error getting service instances: {e}")
         raise HTTPException(
-            status_code=500, detail=f"Failed to get service instances: {str(e)}"
+            status_code=HTTP_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to get service instances: {str(e)}",
         )
 
 
@@ -231,19 +198,7 @@ async def get_healthy_service_instances(service_name: str):
         return {
             "service_name": service_name,
             "healthy_instances": [
-                ServiceInstanceResponse(
-                    service_name=instance.service_name,
-                    instance_id=instance.instance_id,
-                    host=instance.host,
-                    port=instance.port,
-                    health_endpoint=instance.health_endpoint,
-                    status=instance.status.value,
-                    last_health_check=instance.last_health_check,
-                    last_heartbeat=instance.last_heartbeat,
-                    load_percentage=instance.load_percentage,
-                    metadata=instance.metadata,
-                    registered_at=instance.registered_at,
-                )
+                ServiceInstanceResponse.from_service_instance(instance)
                 for instance in instances
             ],
         }
@@ -251,7 +206,8 @@ async def get_healthy_service_instances(service_name: str):
     except Exception as e:
         logger.error(f"Error getting healthy service instances: {e}")
         raise HTTPException(
-            status_code=500, detail=f"Failed to get healthy service instances: {str(e)}"
+            status_code=HTTP_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to get healthy service instances: {str(e)}",
         )
 
 
@@ -259,22 +215,23 @@ async def get_healthy_service_instances(service_name: str):
 async def get_service_instances_for_prometheus(service_name: str):
     """Get service instances in Prometheus HTTP service discovery format"""
     try:
+        from service_discovery.types import PrometheusTarget
+
         instances = await service_registry.get_healthy_service_instances(service_name)
 
-        # Return in Prometheus HTTP service discovery format
         prometheus_instances = []
         for instance in instances:
             prometheus_instances.append(
-                {
-                    "targets": [f"{instance.host}:{instance.port}"],
-                    "labels": {
+                PrometheusTarget(
+                    targets=[f"{instance.host}:{instance.port}"],
+                    labels={
                         "instance": instance.instance_id,
                         "service_name": instance.service_name,
                         "status": instance.status.value,
                         "load_percentage": str(instance.load_percentage),
                         **instance.metadata,
                     },
-                }
+                )
             )
 
         return prometheus_instances
@@ -282,5 +239,6 @@ async def get_service_instances_for_prometheus(service_name: str):
     except Exception as e:
         logger.error(f"Error getting service instances for Prometheus: {e}")
         raise HTTPException(
-            status_code=500, detail=f"Failed to get service instances: {str(e)}"
+            status_code=HTTP_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to get service instances: {str(e)}",
         )

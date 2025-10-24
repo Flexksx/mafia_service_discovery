@@ -2,22 +2,18 @@ import asyncio
 import httpx
 import logging
 from typing import Dict, Optional, List
-from dataclasses import dataclass
 import os
 
+from service_discovery.types import ServiceInstance, ServiceRegistrationRequest
+from service_discovery.constants import (
+    BEARER_PREFIX,
+    DEFAULT_HEARTBEAT_INTERVAL,
+    HEARTBEAT_RETRY_DELAY,
+    LOG_HEARTBEAT_LOOP_STARTED,
+    LOG_HEARTBEAT_LOOP_STOPPED,
+)
+
 logger = logging.getLogger(__name__)
-
-
-@dataclass
-class ServiceInstance:
-    service_name: str
-    instance_id: str
-    host: str
-    port: int
-    health_endpoint: str
-    status: str
-    load_percentage: float
-    metadata: Dict[str, str]
 
 
 class ServiceDiscoveryClient:
@@ -33,7 +29,7 @@ class ServiceDiscoveryClient:
             "SERVICE_DISCOVERY_SECRET", "service-discovery-secret-change-me"
         )
         self._headers = {
-            "Authorization": f"Bearer {self.service_discovery_secret}",
+            "Authorization": f"{BEARER_PREFIX}{self.service_discovery_secret}",
             "Content-Type": "application/json",
         }
         self._heartbeat_task: Optional[asyncio.Task] = None
@@ -50,26 +46,26 @@ class ServiceDiscoveryClient:
     ) -> bool:
         """Register this service instance with the service discovery"""
         try:
-            registration_data = {
-                "service_name": service_name,
-                "instance_id": instance_id,
-                "host": host,
-                "port": port,
-                "health_endpoint": health_endpoint,
-                "metadata": metadata or {},
-            }
+            registration_data = ServiceRegistrationRequest(
+                service_name=service_name,
+                instance_id=instance_id,
+                host=host,
+                port=port,
+                health_endpoint=health_endpoint,
+                metadata=metadata or {},
+            )
 
             async with httpx.AsyncClient() as client:
                 response = await client.post(
                     f"{self.service_discovery_url}/v1/discovery/register",
-                    json=registration_data,
+                    json=registration_data.dict(),
                     headers=self._headers,
                 )
 
                 if response.status_code == 200:
                     result = response.json()
                     if result.get("success"):
-                        self._registered_service = registration_data
+                        self._registered_service = registration_data.dict()
                         logger.info(
                             f"Successfully registered service: {service_name}:{instance_id}"
                         )
@@ -126,7 +122,9 @@ class ServiceDiscoveryClient:
             logger.error(f"Error sending heartbeat: {e}")
             return False
 
-    async def start_heartbeat_loop(self, interval_seconds: int = 60):
+    async def start_heartbeat_loop(
+        self, interval_seconds: int = DEFAULT_HEARTBEAT_INTERVAL
+    ):
         """Start periodic heartbeat sending"""
         if self._heartbeat_task and not self._heartbeat_task.done():
             logger.warning("Heartbeat loop already running")
@@ -135,7 +133,7 @@ class ServiceDiscoveryClient:
         self._heartbeat_task = asyncio.create_task(
             self._heartbeat_loop(interval_seconds)
         )
-        logger.info(f"Started heartbeat loop with {interval_seconds}s interval")
+        logger.info(LOG_HEARTBEAT_LOOP_STARTED.format(interval_seconds))
 
     async def stop_heartbeat_loop(self):
         """Stop the heartbeat loop"""
@@ -145,7 +143,7 @@ class ServiceDiscoveryClient:
                 await self._heartbeat_task
             except asyncio.CancelledError:
                 pass
-            logger.info("Stopped heartbeat loop")
+            logger.info(LOG_HEARTBEAT_LOOP_STOPPED)
 
     async def _heartbeat_loop(self, interval_seconds: int):
         """Internal heartbeat loop"""
@@ -157,7 +155,7 @@ class ServiceDiscoveryClient:
                 break
             except Exception as e:
                 logger.error(f"Error in heartbeat loop: {e}")
-                await asyncio.sleep(5)  # Short delay before retrying
+                await asyncio.sleep(HEARTBEAT_RETRY_DELAY)
 
     async def unregister_service(self) -> bool:
         """Unregister this service instance"""
@@ -280,7 +278,6 @@ class ServiceDiscoveryClient:
             return {}
 
 
-# Convenience function for easy service registration
 async def register_service_with_discovery(
     service_name: str,
     instance_id: str,
@@ -288,12 +285,11 @@ async def register_service_with_discovery(
     port: int,
     health_endpoint: str = "/health",
     metadata: Dict[str, str] = None,
-    heartbeat_interval: int = 60,
+    heartbeat_interval: int = DEFAULT_HEARTBEAT_INTERVAL,
 ) -> ServiceDiscoveryClient:
     """Convenience function to register a service and start heartbeat loop"""
     client = ServiceDiscoveryClient()
 
-    # Register the service
     success = await client.register_service(
         service_name=service_name,
         instance_id=instance_id,
@@ -304,7 +300,6 @@ async def register_service_with_discovery(
     )
 
     if success:
-        # Start heartbeat loop
         await client.start_heartbeat_loop(heartbeat_interval)
         return client
     else:
