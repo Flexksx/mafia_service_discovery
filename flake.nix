@@ -17,7 +17,7 @@
       system:
       let
         pythonVersion = "python312";
-        projectName = "mafia_api_gateway";
+        projectName = "artificial_intelligence_labs";
 
         pkgs = (
           import nixpkgs {
@@ -36,9 +36,8 @@
           zlib
 
           postgresql.lib
-          docker-compose
 
-          ngrok
+          docker-compose
 
           # Example: If you need other common libs
           # openssl

@@ -1,36 +1,20 @@
 from datetime import datetime
-from typing import Dict, Optional, List
-from dataclasses import dataclass, field
-from enum import Enum
+from typing import Dict, List, Optional
 import asyncio
 import logging
+
+from service_discovery.types import ServiceInstance, ServiceStatus
+from service_discovery.constants import (
+    LOG_SERVICE_REGISTERED,
+    LOG_SERVICE_UNREGISTERED,
+    LOG_EXPIRED_SERVICE_REMOVED,
+)
 
 logger = logging.getLogger(__name__)
 
 
-class ServiceStatus(Enum):
-    HEALTHY = "healthy"
-    UNHEALTHY = "unhealthy"
-    UNKNOWN = "unknown"
-
-
-@dataclass
-class ServiceInstance:
-    service_name: str
-    instance_id: str
-    host: str
-    port: int
-    health_endpoint: str
-    status: ServiceStatus = ServiceStatus.UNKNOWN
-    last_health_check: Optional[datetime] = None
-    last_heartbeat: Optional[datetime] = None
-    load_percentage: float = 0.0
-    metadata: Dict[str, str] = field(default_factory=dict)
-    registered_at: datetime = field(default_factory=datetime.now)
-
-
 class ServiceRegistry:
-    """In-memory service registry for tracking service instances"""
+    """Core service registry for tracking service instances"""
 
     def __init__(self):
         self._services: Dict[str, Dict[str, ServiceInstance]] = {}
@@ -47,21 +31,22 @@ class ServiceRegistry:
 
             self._services[service_name][instance_id] = service_instance
             logger.info(
-                f"Registered service: {service_name}:{instance_id} at {service_instance.host}:{service_instance.port}"
+                LOG_SERVICE_REGISTERED.format(
+                    service_name,
+                    instance_id,
+                    service_instance.host,
+                    service_instance.port,
+                )
             )
             return True
 
     async def unregister_service(self, service_name: str, instance_id: str) -> bool:
         """Unregister a service instance"""
         async with self._lock:
-            if (
-                service_name in self._services
-                and instance_id in self._services[service_name]
-            ):
+            if self._service_exists(service_name, instance_id):
                 del self._services[service_name][instance_id]
-                if not self._services[service_name]:
-                    del self._services[service_name]
-                logger.info(f"Unregistered service: {service_name}:{instance_id}")
+                self._cleanup_empty_service(service_name)
+                logger.info(LOG_SERVICE_UNREGISTERED.format(service_name, instance_id))
                 return True
             return False
 
@@ -74,10 +59,7 @@ class ServiceRegistry:
     ) -> bool:
         """Update service health status"""
         async with self._lock:
-            if (
-                service_name in self._services
-                and instance_id in self._services[service_name]
-            ):
+            if self._service_exists(service_name, instance_id):
                 service = self._services[service_name][instance_id]
                 service.status = status
                 service.last_health_check = datetime.now()
@@ -88,10 +70,7 @@ class ServiceRegistry:
     async def update_heartbeat(self, service_name: str, instance_id: str) -> bool:
         """Update service heartbeat timestamp"""
         async with self._lock:
-            if (
-                service_name in self._services
-                and instance_id in self._services[service_name]
-            ):
+            if self._service_exists(service_name, instance_id):
                 service = self._services[service_name][instance_id]
                 service.last_heartbeat = datetime.now()
                 return True
@@ -130,24 +109,41 @@ class ServiceRegistry:
             removed_count = 0
 
             for service_name in list(self._services.keys()):
-                for instance_id in list(self._services[service_name].keys()):
-                    service = self._services[service_name][instance_id]
-                    if service.last_heartbeat:
-                        time_since_heartbeat = (
-                            now - service.last_heartbeat
-                        ).total_seconds()
-                        if time_since_heartbeat > ttl_seconds:
-                            del self._services[service_name][instance_id]
-                            removed_count += 1
-                            logger.warning(
-                                f"Removed expired service: {service_name}:{instance_id}"
-                            )
-
-                # Remove empty service entries
-                if not self._services[service_name]:
-                    del self._services[service_name]
+                removed_count += await self._cleanup_service_instances(
+                    service_name, now, ttl_seconds
+                )
+                self._cleanup_empty_service(service_name)
 
             return removed_count
+
+    def _service_exists(self, service_name: str, instance_id: str) -> bool:
+        """Check if service instance exists"""
+        return (
+            service_name in self._services
+            and instance_id in self._services[service_name]
+        )
+
+    def _cleanup_empty_service(self, service_name: str) -> None:
+        """Remove empty service entries"""
+        if service_name in self._services and not self._services[service_name]:
+            del self._services[service_name]
+
+    async def _cleanup_service_instances(
+        self, service_name: str, now: datetime, ttl_seconds: int
+    ) -> int:
+        """Clean up expired instances for a specific service"""
+        removed_count = 0
+        for instance_id in list(self._services[service_name].keys()):
+            service = self._services[service_name][instance_id]
+            if service.last_heartbeat:
+                time_since_heartbeat = (now - service.last_heartbeat).total_seconds()
+                if time_since_heartbeat > ttl_seconds:
+                    del self._services[service_name][instance_id]
+                    removed_count += 1
+                    logger.warning(
+                        LOG_EXPIRED_SERVICE_REMOVED.format(service_name, instance_id)
+                    )
+        return removed_count
 
 
 # Global service registry instance

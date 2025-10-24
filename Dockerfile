@@ -13,7 +13,7 @@ COPY pyproject.toml ./
 # Install poetry and dependencies
 RUN pip install poetry && \
     poetry config virtualenvs.create false && \
-    poetry install --only=main --no-root
+    poetry install --no-root
 
 # Copy application code
 COPY service_discovery/ ./service_discovery/

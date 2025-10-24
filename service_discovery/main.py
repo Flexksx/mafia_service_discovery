@@ -1,10 +1,9 @@
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 import logging
-import asyncio
 
-from service_discovery.routers import router
-from service_discovery.health_monitor import health_monitor
+from service_discovery.api import api_router
+from service_discovery.service_registration.health_monitor import health_monitor
 from service_discovery.config import LOG_LEVEL, LOG_FORMAT
 
 # Configure logging
@@ -36,8 +35,8 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# Include routers
-app.include_router(router, prefix="/v1/discovery", tags=["Service Discovery"])
+# Include API routers
+app.include_router(api_router)
 
 
 @app.get("/")

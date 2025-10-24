@@ -1,0 +1,25 @@
+services:
+  service-discovery:
+    build: .
+    ports:
+      - "3004:3004"
+    environment:
+      - SERVICE_DISCOVERY_HOST=0.0.0.0
+      - SERVICE_DISCOVERY_PORT=3004
+      - LOG_LEVEL=INFO
+      - HEALTH_CHECK_INTERVAL_SECONDS=10
+      - HEALTH_CHECK_TIMEOUT_SECONDS=5
+      - SERVICE_REGISTRATION_TTL_SECONDS=60
+      - SERVICE_DISCOVERY_SECRET=test-secret-key
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3004/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - service-discovery-network
+
+networks:
+  service-discovery-network:
+    driver: bridge
