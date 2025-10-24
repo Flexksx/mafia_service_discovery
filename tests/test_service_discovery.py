@@ -6,7 +6,7 @@ from typing import List
 from tests.test_client import (
     ServiceDiscoveryTestClient,
     MockService,
-    TestServiceInstance,
+    ServiceInstanceData,
 )
 
 logger = logging.getLogger(__name__)
@@ -23,7 +23,7 @@ class TestServiceDiscovery:
     @pytest.fixture
     async def mock_service(self):
         """Create and start a mock service"""
-        service = MockService("test-service", "instance-1", 8001)
+        service = MockService("test-service", "instance-1")
         await service.start()
         yield service
         await service.stop()
@@ -100,7 +100,7 @@ class TestServiceDiscovery:
         # Create multiple mock services
         services = []
         for i in range(3):
-            service = MockService(f"multi-service", f"instance-{i+1}", 8002 + i)
+            service = MockService(f"multi-service", f"instance-{i+1}")
             await service.start()
             services.append(service)
 
@@ -213,7 +213,7 @@ class TestServiceDiscovery:
         # Create multiple services concurrently
         services = []
         for i in range(5):
-            service = MockService(f"concurrent-service", f"instance-{i+1}", 9001 + i)
+            service = MockService(f"concurrent-service", f"instance-{i+1}")
             await service.start()
             services.append(service)
 
@@ -260,7 +260,7 @@ class TestServiceDiscovery:
         # Create client without authentication
         unauthenticated_client = ServiceDiscoveryTestClient(secret="wrong-secret")
 
-        service_instance = TestServiceInstance(
+        service_instance = ServiceInstanceData(
             service_name="auth-test",
             instance_id="instance-1",
             host="localhost",

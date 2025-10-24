@@ -32,6 +32,24 @@ class TestRunner:
         self.docker_compose_file = self.project_root / "docker-compose.yml"
         self.service_url = "http://localhost:3004"
         self.max_wait_time = 120  # 2 minutes
+        self.docker_compose_cmd = self._detect_docker_compose_command()
+
+    def _detect_docker_compose_command(self) -> list:
+        """Detect the correct docker compose command"""
+        # Try docker compose (V2) first
+        exit_code, _, _ = self.run_command(["docker", "compose", "version"])
+        if exit_code == 0:
+            logger.info("Using Docker Compose V2 (docker compose)")
+            return ["docker", "compose"]
+
+        # Fallback to docker-compose (V1)
+        exit_code, _, _ = self.run_command(["docker-compose", "version"])
+        if exit_code == 0:
+            logger.info("Using Docker Compose V1 (docker-compose)")
+            return ["docker-compose"]
+
+        logger.error("Neither 'docker compose' nor 'docker-compose' found!")
+        return ["docker", "compose"]  # Default to V2
 
     def run_command(self, command: list, cwd: Path = None) -> tuple[int, str, str]:
         """Run a shell command and return exit code, stdout, stderr"""
@@ -55,7 +73,7 @@ class TestRunner:
         """Stop docker services"""
         logger.info("Stopping existing docker services...")
         exit_code, stdout, stderr = self.run_command(
-            ["docker-compose", "-f", str(self.docker_compose_file), "down"]
+            self.docker_compose_cmd + ["-f", str(self.docker_compose_file), "down"]
         )
 
         if exit_code != 0:
@@ -67,8 +85,8 @@ class TestRunner:
         """Start docker services"""
         logger.info("Starting docker services...")
         exit_code, stdout, stderr = self.run_command(
-            [
-                "docker-compose",
+            self.docker_compose_cmd
+            + [
                 "-f",
                 str(self.docker_compose_file),
                 "up",
@@ -108,6 +126,15 @@ class TestRunner:
     def run_tests(self) -> bool:
         """Run the test suite"""
         logger.info("Running test suite...")
+
+        # Reset port counter before running tests
+        try:
+            from tests.test_client import reset_port_counter
+
+            reset_port_counter()
+            logger.info("Reset port counter for clean test run")
+        except Exception as e:
+            logger.warning(f"Could not reset port counter: {e}")
 
         # Install test dependencies if needed
         test_deps = ["pytest", "pytest-asyncio", "httpx"]
@@ -150,7 +177,8 @@ class TestRunner:
         logger.info("=" * 50)
 
         exit_code, stdout, stderr = self.run_command(
-            ["docker-compose", "-f", str(self.docker_compose_file), "logs", "--tail=50"]
+            self.docker_compose_cmd
+            + ["-f", str(self.docker_compose_file), "logs", "--tail=50"]
         )
 
         if stdout:

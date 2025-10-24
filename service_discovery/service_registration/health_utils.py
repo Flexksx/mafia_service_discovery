@@ -1,7 +1,7 @@
 import asyncio
 import logging
 import psutil
-from typing import Dict, Any, Optional
+from typing import Callable, Dict, Any, Optional
 from datetime import datetime
 
 from service_discovery.types import HealthCheckResult
@@ -23,9 +23,9 @@ class HealthChecker:
     def __init__(self, service_name: str):
         self.service_name = service_name
         self.start_time = datetime.now()
-        self._custom_checks: Dict[str, callable] = {}
+        self._custom_checks: Dict[str, Callable] = {}
 
-    def add_custom_check(self, name: str, check_func: callable):
+    def add_custom_check(self, name: str, check_func: Callable):
         """Add a custom health check function"""
         self._custom_checks[name] = check_func
 
@@ -86,7 +86,7 @@ class HealthChecker:
 
         return custom_results
 
-    async def _execute_check(self, check_func: callable) -> Any:
+    async def _execute_check(self, check_func: Callable) -> Any:
         """Execute a single health check function"""
         if asyncio.iscoroutinefunction(check_func):
             return await check_func()

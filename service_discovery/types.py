@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Dict, Optional, List
+from typing import Any, Dict, Optional, List
 from dataclasses import dataclass, field
 from enum import Enum
 from pydantic import BaseModel, Field, validator
@@ -111,7 +111,7 @@ class HealthCheckResult(BaseModel):
     timestamp: str
     uptime_seconds: float
     load_percentage: float
-    custom_checks: Optional[Dict[str, Dict[str, any]]] = None
+    custom_checks: Optional[Dict[str, Dict[str, Any]]] = None
 
 
 class PrometheusTarget(BaseModel):

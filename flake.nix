@@ -37,7 +37,7 @@
 
           postgresql.lib
 
-          ngrok
+          docker-compose
 
           # Example: If you need other common libs
           # openssl

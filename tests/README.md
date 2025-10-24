@@ -27,7 +27,7 @@ This script will:
 
 ```bash
 # Start the service discovery service
-docker-compose up -d --build
+docker compose up -d --build
 
 # Wait for service to be ready (check http://localhost:3004/health)
 
@@ -35,7 +35,7 @@ docker-compose up -d --build
 python -m pytest tests/ -v
 
 # Stop services
-docker-compose down
+docker compose down
 ```
 
 ## Test Coverage
@@ -92,7 +92,7 @@ Test configuration is handled in `conftest.py`:
 
 ### Service Not Ready
 If tests fail with "service not ready":
-1. Check docker logs: `docker-compose logs`
+1. Check docker logs: `docker compose logs`
 2. Verify port 3004 is not in use
 3. Check service discovery health: `curl http://localhost:3004/health`
 

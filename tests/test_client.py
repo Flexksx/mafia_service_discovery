@@ -2,6 +2,9 @@ import asyncio
 import httpx
 import logging
 import time
+import os
+import random
+import socket
 from typing import Dict, List, Optional
 from dataclasses import dataclass
 from datetime import datetime
@@ -9,8 +12,25 @@ from datetime import datetime
 logger = logging.getLogger(__name__)
 
 
+def get_next_port() -> int:
+    """Get a random available port"""
+    while True:
+        port = random.randint(9000, 9999)  # Use higher port range to avoid conflicts
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                s.bind(("localhost", port))
+                return port
+        except OSError:
+            continue  # Port is in use, try another one
+
+
+def reset_port_counter():
+    """No-op for random port assignment"""
+    pass
+
+
 @dataclass
-class TestServiceInstance:
+class ServiceInstanceData:
     service_name: str
     instance_id: str
     host: str
@@ -59,7 +79,7 @@ class ServiceDiscoveryTestClient:
         logger.error(f"Service discovery service not ready after {timeout} seconds")
         return False
 
-    async def register_service(self, service: TestServiceInstance) -> bool:
+    async def register_service(self, service: ServiceInstanceData) -> bool:
         """Register a service instance"""
         try:
             registration_data = {
@@ -236,7 +256,7 @@ class ServiceDiscoveryTestClient:
 class MockService:
     """Mock service that simulates a real service for testing"""
 
-    def __init__(self, service_name: str, instance_id: str, port: int):
+    def __init__(self, service_name: str, instance_id: str, port: int = None):
         self.service_name = service_name
         self.instance_id = instance_id
         self.port = port
@@ -246,8 +266,15 @@ class MockService:
         self._running = False
         self._server = None
 
+    async def _ensure_port(self):
+        """Ensure we have a port assigned"""
+        if self.port is None:
+            self.port = get_next_port()
+
     async def start(self):
         """Start the mock service"""
+        await self._ensure_port()
+
         from fastapi import FastAPI
         import uvicorn
 
@@ -281,9 +308,9 @@ class MockService:
             self._server.should_exit = True
             self._running = False
 
-    def get_test_instance(self) -> TestServiceInstance:
-        """Get TestServiceInstance for this mock service"""
-        return TestServiceInstance(
+    def get_test_instance(self) -> ServiceInstanceData:
+        """Get ServiceInstanceData for this mock service"""
+        return ServiceInstanceData(
             service_name=self.service_name,
             instance_id=self.instance_id,
             host=self.host,
