@@ -318,6 +318,22 @@ class ServiceDiscoveryTestClient:
             logger.error(f"Error resetting monitoring stats: {e}")
             return False
 
+    async def get_prometheus_metrics(self) -> str:
+        """Get Prometheus metrics in text format"""
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.get(f"{self.base_url}/metrics")
+
+                if response.status_code == 200:
+                    return response.text
+                else:
+                    logger.error(f"Failed to get Prometheus metrics: {response.status_code}")
+                    return ""
+
+        except Exception as e:
+            logger.error(f"Error getting Prometheus metrics: {e}")
+            return ""
+
 
 class MockService:
     """Mock service that simulates a real service for testing"""

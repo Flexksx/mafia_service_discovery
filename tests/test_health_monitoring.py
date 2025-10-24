@@ -316,6 +316,20 @@ class TestHealthMonitoring:
         assert inspect.iscoroutinefunction(client.reset_monitoring_stats)
 
     @pytest.mark.asyncio
+    async def test_prometheus_metrics_endpoint(self):
+        """Test Prometheus metrics endpoint"""
+        from tests.test_client import ServiceDiscoveryTestClient
+        
+        client = ServiceDiscoveryTestClient()
+        
+        # Test that the metrics endpoint exists
+        assert hasattr(client, 'get_prometheus_metrics')
+        
+        # Test that method is async function
+        import inspect
+        assert inspect.iscoroutinefunction(client.get_prometheus_metrics)
+
+    @pytest.mark.asyncio
     async def test_structured_logging(self):
         """Test structured logging functionality"""
         logger = ServiceDiscoveryLogger.get_logger("test")
