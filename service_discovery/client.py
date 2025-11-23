@@ -43,6 +43,7 @@ class ServiceDiscoveryClient:
         port: int,
         health_endpoint: str = "/health",
         metadata: Dict[str, str] = None,
+        topics: List[str] = None,
     ) -> bool:
         """Register this service instance with the service discovery"""
         try:
@@ -53,6 +54,7 @@ class ServiceDiscoveryClient:
                 port=port,
                 health_endpoint=health_endpoint,
                 metadata=metadata or {},
+                topics=topics or [],
             )
 
             async with httpx.AsyncClient() as client:

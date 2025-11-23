@@ -32,6 +32,7 @@ class ServiceInstance:
     load_percentage: float = 0.0
     metadata: Dict[str, str] = field(default_factory=dict)
     registered_at: datetime = field(default_factory=datetime.now)
+    topics: List[str] = field(default_factory=list)
 
     def __post_init__(self):
         if self.load_percentage > MAX_LOAD_PERCENTAGE:
@@ -46,6 +47,7 @@ class ServiceRegistrationRequest(BaseModel):
     port: int = Field(..., ge=1, le=65535)
     health_endpoint: str = Field(default=DEFAULT_HEALTH_ENDPOINT)
     metadata: Dict[str, str] = Field(default_factory=dict)
+    topics: List[str] = Field(default_factory=list)
 
     @validator("health_endpoint")
     def validate_health_endpoint(cls, v):
@@ -81,6 +83,7 @@ class ServiceInstanceResponse(BaseModel):
     load_percentage: float
     metadata: Dict[str, str]
     registered_at: datetime
+    topics: List[str]
 
     @classmethod
     def from_service_instance(
@@ -98,6 +101,7 @@ class ServiceInstanceResponse(BaseModel):
             load_percentage=instance.load_percentage,
             metadata=instance.metadata,
             registered_at=instance.registered_at,
+            topics=instance.topics,
         )
 
 
@@ -117,3 +121,15 @@ class HealthCheckResult(BaseModel):
 class PrometheusTarget(BaseModel):
     targets: List[str]
     labels: Dict[str, str]
+
+
+class TopicSubscription(BaseModel):
+    """Represents a topic and its subscribed services"""
+    topic: str
+    services: List[str]
+
+
+class TopicListResponse(BaseModel):
+    """Response model for GET /services/topics endpoint"""
+    topics: List[TopicSubscription]
+

@@ -148,6 +148,35 @@ class ServiceRegistry:
                     )
         return removed_count
 
+    async def get_all_topic_subscriptions(self) -> Dict[str, List[str]]:
+        """Get all topic subscriptions with their subscribed services"""
+        async with self._lock:
+            topic_map: Dict[str, List[str]] = {}
+            
+            for service_name, instances in self._services.items():
+                for instance in instances.values():
+                    for topic in instance.topics:
+                        if topic not in topic_map:
+                            topic_map[topic] = []
+                        if service_name not in topic_map[topic]:
+                            topic_map[topic].append(service_name)
+            
+            return topic_map
+
+    async def get_services_by_topic(self, topic: str) -> List[str]:
+        """Get all service names subscribed to a specific topic"""
+        async with self._lock:
+            service_names = set()
+            
+            for service_name, instances in self._services.items():
+                for instance in instances.values():
+                    if topic in instance.topics:
+                        service_names.add(service_name)
+                        break
+            
+            return list(service_names)
+
 
 # Global service registry instance
 service_registry = ServiceRegistry()
+
