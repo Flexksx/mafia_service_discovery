@@ -25,6 +25,8 @@ class ServiceInstance:
     instance_id: str
     host: str
     port: int
+    instance_url: str = ""
+    grpc_port: Optional[int] = None
     health_endpoint: str = DEFAULT_HEALTH_ENDPOINT
     status: ServiceStatus = ServiceStatus.UNKNOWN
     last_health_check: Optional[datetime] = None
@@ -32,8 +34,12 @@ class ServiceInstance:
     load_percentage: float = 0.0
     metadata: Dict[str, str] = field(default_factory=dict)
     registered_at: datetime = field(default_factory=datetime.now)
+    topics: List[str] = field(default_factory=list)
 
     def __post_init__(self):
+        # Auto-generate instance_url if not provided
+        if not self.instance_url:
+            self.instance_url = f"http://{self.host}:{self.port}"
         if self.load_percentage > MAX_LOAD_PERCENTAGE:
             self.load_percentage = MAX_LOAD_PERCENTAGE
 
@@ -44,13 +50,26 @@ class ServiceRegistrationRequest(BaseModel):
     instance_id: str = Field(..., min_length=1, max_length=100)
     host: str = Field(..., min_length=1)
     port: int = Field(..., ge=1, le=65535)
+    instance_url: Optional[str] = None
+    grpc_port: Optional[int] = Field(None, ge=1, le=65535)
     health_endpoint: str = Field(default=DEFAULT_HEALTH_ENDPOINT)
     metadata: Dict[str, str] = Field(default_factory=dict)
+    topics: List[str] = Field(default_factory=list)
 
     @validator("health_endpoint")
     def validate_health_endpoint(cls, v):
         if not v.startswith("/"):
             raise ValueError("Health endpoint must start with /")
+        return v
+
+    @validator("instance_url", always=True)
+    def validate_instance_url(cls, v, values):
+        """Auto-generate instance_url from host and port if not provided"""
+        if not v:
+            host = values.get('host')
+            port = values.get('port')
+            if host and port:
+                return f"http://{host}:{port}"
         return v
 
 
@@ -74,6 +93,8 @@ class ServiceInstanceResponse(BaseModel):
     instance_id: str
     host: str
     port: int
+    instance_url: str
+    grpc_port: Optional[int]
     health_endpoint: str
     status: str
     last_health_check: Optional[datetime]
@@ -81,6 +102,7 @@ class ServiceInstanceResponse(BaseModel):
     load_percentage: float
     metadata: Dict[str, str]
     registered_at: datetime
+    topics: List[str]
 
     @classmethod
     def from_service_instance(
@@ -91,6 +113,8 @@ class ServiceInstanceResponse(BaseModel):
             instance_id=instance.instance_id,
             host=instance.host,
             port=instance.port,
+            instance_url=instance.instance_url,
+            grpc_port=instance.grpc_port,
             health_endpoint=instance.health_endpoint,
             status=instance.status.value,
             last_health_check=instance.last_health_check,
@@ -98,6 +122,7 @@ class ServiceInstanceResponse(BaseModel):
             load_percentage=instance.load_percentage,
             metadata=instance.metadata,
             registered_at=instance.registered_at,
+            topics=instance.topics,
         )
 
 
@@ -117,3 +142,15 @@ class HealthCheckResult(BaseModel):
 class PrometheusTarget(BaseModel):
     targets: List[str]
     labels: Dict[str, str]
+
+
+class TopicSubscription(BaseModel):
+    """Represents a topic and its subscribed services"""
+    topic: str
+    services: List[str]
+
+
+class TopicListResponse(BaseModel):
+    """Response model for GET /services/topics endpoint"""
+    topics: List[TopicSubscription]
+

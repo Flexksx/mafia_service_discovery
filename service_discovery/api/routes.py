@@ -66,8 +66,11 @@ async def register_service(
             instance_id=request.instance_id,
             host=request.host,
             port=request.port,
+            instance_url=request.instance_url or f"http://{request.host}:{request.port}",
+            grpc_port=request.grpc_port,
             health_endpoint=request.health_endpoint,
             metadata=request.metadata,
+            topics=request.topics,
         )
 
         success = await service_registry.register_service(service_instance)
@@ -160,6 +163,33 @@ async def list_all_services():
         raise HTTPException(
             status_code=HTTP_INTERNAL_SERVER_ERROR,
             detail=f"Failed to list services: {str(e)}",
+        )
+
+
+@router.get("/services/topics")
+async def get_topic_subscriptions():
+    """Get all topic subscriptions for Message Broker
+    
+    Returns a list of topics with their subscribed services.
+    This endpoint is used by the Message Broker to route topic-based messages.
+    """
+    try:
+        from service_discovery.types import TopicSubscription, TopicListResponse
+        
+        topic_map = await service_registry.get_all_topic_subscriptions()
+        
+        topics = [
+            TopicSubscription(topic=topic, services=services)
+            for topic, services in topic_map.items()
+        ]
+        
+        return TopicListResponse(topics=topics)
+    
+    except Exception as e:
+        logger.error(f"Error getting topic subscriptions: {e}")
+        raise HTTPException(
+            status_code=HTTP_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to get topic subscriptions: {str(e)}",
         )
 
 
