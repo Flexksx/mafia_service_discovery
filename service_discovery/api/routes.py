@@ -66,6 +66,8 @@ async def register_service(
             instance_id=request.instance_id,
             host=request.host,
             port=request.port,
+            instance_url=request.instance_url or f"http://{request.host}:{request.port}",
+            grpc_port=request.grpc_port,
             health_endpoint=request.health_endpoint,
             metadata=request.metadata,
             topics=request.topics,
